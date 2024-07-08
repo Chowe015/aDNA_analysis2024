@@ -1,0 +1,196 @@
+---
+title: "aDNA Analysis"
+author: "Colin Howe"
+date: "2024-07-02"
+output: html_document
+---
+# Set working directory
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = 'C:/Users/Colin Howe/Desktop/PSU Doctoral Program/GCMP_Working/aDNA Linear Analysis 2024')
+
+```
+# Activate required libraries
+```{r, message=FALSE, warning=FALSE}
+library(BiocManager)
+library(tidyverse)
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(qiime2R)
+library(DESeq2)
+library(vegan)
+library(microbiome)
+library(tidyr)
+library(lme4)
+library(nlme)
+library(knitr)
+library(broom)
+library(RColorBrewer)
+library(reshape2)
+```
+
+# Import Data & Create Phyloseq Object
+```{r}
+
+asv <- read.table(file = "aDNA_bact_table.txt", sep = "\t", header=T, row.names=1)
+mapping <- read.table(file = "adna_mapping_2024.txt",header=T,comment.char="", row.names=1, sep="\t")
+taxonomy <- read.table(file ="aDNA_taxonomy.txt", sep = "\t", header=T,row.names=1)
+symb_asv <- read.table(file = "aDNA_symb_table.txt", sep = "\t", header=T, row.names=1)
+
+# clean the taxonomy
+##code referenced from Yan Hui: email me@yanh.org github: yanhui09
+tax <- taxonomy %>%
+  select(Taxon) %>% 
+  separate(Taxon, c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species"), "; ")
+
+tax.clean <- data.frame(row.names = row.names(tax),
+                        Kingdom = str_replace(tax[,1], "k__",""),
+                        Phylum = str_replace(tax[,2], "p__",""),
+                        Class = str_replace(tax[,3], "c__",""),
+                        Order = str_replace(tax[,4], "o__",""),
+                        Family = str_replace(tax[,5], "f__",""),
+                        Genus = str_replace(tax[,6], "g__",""),
+                        Species = str_replace(tax[,7], "s__",""),
+                        stringsAsFactors = FALSE)
+
+tax.clean[is.na(tax.clean)] <- ""
+tax.clean[tax.clean=="__"] <- ""
+
+for (i in 1:nrow(tax.clean)){
+  if (tax.clean[i,7] != ""){
+    tax.clean$Species[i] <- paste(tax.clean$Genus[i], tax.clean$Species[i], sep = " ")
+  } else if (tax.clean[i,2] == ""){
+    kingdom <- paste("Unclassified", tax.clean[i,1], sep = " ")
+    tax.clean[i, 2:7] <- kingdom
+  } else if (tax.clean[i,3] == ""){
+    phylum <- paste("Unclassified", tax.clean[i,2], sep = " ")
+    tax.clean[i, 3:7] <- phylum
+  } else if (tax.clean[i,4] == ""){
+    class <- paste("Unclassified", tax.clean[i,3], sep = " ")
+    tax.clean[i, 4:7] <- class
+  } else if (tax.clean[i,5] == ""){
+    order <- paste("Unclassified", tax.clean[i,4], sep = " ")
+    tax.clean[i, 5:7] <- order
+  } else if (tax.clean[i,6] == ""){
+    family <- paste("Unclassified", tax.clean[i,5], sep = " ")
+    tax.clean[i, 6:7] <- family
+  } else if (tax.clean[i,7] == ""){
+    tax.clean$Species[i] <- paste("Unclassified ",tax.clean$Genus[i], sep = " ")
+  }
+}
+
+# create matrix format for OTU and taxonomy table
+OTU <- otu_table(as.matrix(asv), taxa_are_rows = TRUE)
+OTU1 <- otu_table(as.matrix(symb_asv), taxa_are_rows = TRUE)
+
+tax = tax_table(as.matrix(tax.clean))
+
+# Set metadata
+SAMPLE <- sample_data(mapping)
+
+# Create Working phyloseq object
+bacteria<- phyloseq(OTU,tax,SAMPLE)
+symbiont<- phyloseq(OTU1,tax,SAMPLE)
+
+```
+
+# NMDS Plot with Environmental data
+```{r}
+# calculate shannon diversity and relative abundances of symbiont for variable i just copied the output manually into mapping to create sym_shannondiversity and bact_shannonDiversity
+#smb <- prune_taxa(speciesSums(symbiont) > 0, symbiont)
+#smb_rich <- estimate_richness(smb, split = TRUE, measures = "Shannon")
+#bac_rich <-estimate_richness(bacteria, split = TRUE, measures = "Shannon")
+
+#subset the community
+
+com = mapping[,17:52]
+env = mapping[,1:15]
+
+#convert com to a matrix
+m_com = as.matrix(com)
+
+#nmds
+set.seed(123)
+nmds = metaMDS(m_com, distance = "bray")
+nmds
+# environmental variables
+en = envfit(nmds, env, permutations = 999, na.rm = TRUE)
+
+plot(nmds)
+plot(en)
+
+# extract scores
+data.scores = as.data.frame(scores(nmds)$sites)
+time <-as.character(env$date)
+data.scores$date = time
+data.scores$time_point = env$time_period
+data.scores$bleaching = env$time_point
+
+# create plot envs variables
+en_coord_cont = as.data.frame(scores(en, "vectors")) * ordiArrowMul(en)
+en_coord_cat = as.data.frame(scores(en, "factors")) * ordiArrowMul(en)
+en_coord_cont$time_point = time  
+
+## Final plot
+gg = ggplot(data = data.scores, aes(x = NMDS1, y = NMDS2)) + 
+     geom_point(data = data.scores, aes(colour = bleaching), size = 3, alpha = 0.5) + 
+     scale_colour_manual(values= c("#1F78B4","#FF7F00","#6A3D9A")) + 
+     geom_text(data = data.scores, aes(x = NMDS1, y = NMDS2+.02), colour = "black", 
+       fontface = "bold", label = time) + 
+     geom_segment(aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2), 
+       data = en_coord_cont, linewidth =.5, alpha = 0.5, colour = "grey30")  + 
+     geom_text(data = en_coord_cont, aes(x = NMDS1, y = NMDS2), colour = "navy", 
+       fontface = "bold", label = row.names(en_coord_cont))  + 
+     theme(axis.title = element_text(size = 10, face = "bold", colour = "black"), 
+       panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "black"), 
+       axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), 
+       legend.title = element_text(size = 10, face = "bold", colour = "black"), 
+       legend.text = element_text(size = 9, colour = "black")) + 
+     labs(colour = "bleaching")
+  
+```  
+
+# linear analysis
+```{r}
+# melt table for linear model
+table <- as.data.frame.table(asv)
+melted_table <- melt(table)
+
+lm_model = lm(value ~ Var1, data=melted_table); summary(lm_model)
+lm_results <- tidy(summary(lm_model))
+linear_results <-kable(lm_results)
+write.csv(lm_results,"aDNA linear results.csv",row.names = TRUE)
+```
+
+#aDNA metagenomic Ordination Plots
+```{r}
+# Ordinate
+bray_bact = phyloseq::distance(bacteria, method="bray")
+
+# Create data frame for downstream analysis
+bact_df <- data.frame(sample_data(bacteria))
+
+##Calculate the PCoA on Complex Corals
+rt.pcoa = ordinate(bacteria, method="PCoA", distance=bray_bact)
+
+# Set variables to zero for subsequent changes
+pcoa<-0
+
+# Plot pcoa
+pcoa <- plot_ordination(bacteria, rt.pcoa, title =" Bacteria Bray-Curtis PCoA across date", color = "time_point")+
+geom_text(aes(label = date), size = 4, vjust =-0.3,hjust = -0.4) + geom_point(size = 4) + theme_bw() + geom_point(size = 4) +  geom_point(size=3) + theme_bw() + theme(plot.title = element_text(hjust = 0.5)) + theme(legend.text=element_text(size=12)) + theme(axis.text=element_text(size=12, face = "bold"), axis.title=element_text(size=14,face="bold") + theme(geom_text = element_text(size = 20,face = "bold")))
+
+### PERMANOVA ANALYSIS #####
+#env material include mucus, tissue and skeleton, and outgroups without eDNA
+distance_methods <-("bray_bact")
+set.seed(129)
+
+# This is what is called a for loop.        
+for (i in distance_methods){ 
+  form <- as.formula(paste(i,"time_period+time_point+date", sep="~"))
+  print(form)
+ adonis2(form, data=bact_df)-> result
+ print(result)
+}
+
+```
