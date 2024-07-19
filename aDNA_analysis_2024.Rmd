@@ -17,12 +17,10 @@ library(phyloseq)
 library(ggplot2)
 library(dplyr)
 library(qiime2R)
-library(DESeq2)
 library(vegan)
 library(microbiome)
 library(tidyr)
 library(lme4)
-library(nlme)
 library(knitr)
 library(broom)
 library(RColorBrewer)
@@ -97,14 +95,15 @@ symbiont<- phyloseq(OTU1,tax,SAMPLE)
 # NMDS Plot with Environmental data
 ```{r}
 # calculate shannon diversity and relative abundances of symbiont for variable i just copied the output manually into mapping to create sym_shannondiversity and bact_shannonDiversity
+
 #smb <- prune_taxa(speciesSums(symbiont) > 0, symbiont)
 #smb_rich <- estimate_richness(smb, split = TRUE, measures = "Shannon")
 #bac_rich <-estimate_richness(bacteria, split = TRUE, measures = "Shannon")
 
 #subset the community
 
-com = mapping[,17:52]
-env = mapping[,1:15]
+com = bact_data_df[,17:52]
+env = bact_data_df[,1:15]
 
 #convert com to a matrix
 m_com = as.matrix(com)
@@ -129,24 +128,25 @@ data.scores$bleaching = env$time_point
 # create plot envs variables
 en_coord_cont = as.data.frame(scores(en, "vectors")) * ordiArrowMul(en)
 en_coord_cat = as.data.frame(scores(en, "factors")) * ordiArrowMul(en)
-en_coord_cont$time_point = time  
+##en_coord_cont$time_point = time  
 
 ## Final plot
 gg = ggplot(data = data.scores, aes(x = NMDS1, y = NMDS2)) + 
      geom_point(data = data.scores, aes(colour = bleaching), size = 3, alpha = 0.5) + 
-     scale_colour_manual(values= c("#1F78B4","#FF7F00","#6A3D9A")) + 
-     geom_text(data = data.scores, aes(x = NMDS1, y = NMDS2+.02), colour = "black", 
-       fontface = "bold", label = time) + 
-     geom_segment(aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2), 
-       data = en_coord_cont, linewidth =.5, alpha = 0.5, colour = "grey30")  + 
-     geom_text(data = en_coord_cont, aes(x = NMDS1, y = NMDS2), colour = "navy", 
-       fontface = "bold", label = row.names(en_coord_cont))  + 
+     scale_colour_manual(values= c("#1F78B4","#FF7F00","#6A3D9A")) +  geom_segment(aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),  data = en_coord_cont, linewidth =.5, alpha = 0.5, colour = "grey30")  +  geom_text(data = en_coord_cont, aes(x = NMDS1, y = NMDS2), colour = "navy", fontface = "bold", label = row.names(en_coord_cont)) +
+geom_text(aes(label = date), size = 4, vjust =-0.3,hjust = 0.8)  + 
      theme(axis.title = element_text(size = 10, face = "bold", colour = "black"), 
        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "black"), 
        axis.ticks = element_blank(), axis.text = element_blank(), legend.key = element_blank(), 
        legend.title = element_text(size = 10, face = "bold", colour = "black"), 
        legend.text = element_text(size = 9, colour = "black")) + 
-     labs(colour = "bleaching")
+     labs(colour = "bleaching") #+ 
+
+geom_text(data = data.scores, aes(x = NMDS1, y = NMDS2+.02), colour = "black",  fontface = "bold", label = time) +  
+
+gg_segment = ggplot(data = data.scores, aes(x = NMDS1, y = NMDS2)) +  geom_segment(aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),  data = en_coord_cont, linewidth =.5, alpha = 0.5, colour = "grey30")  +  geom_text(data = en_coord_cont, aes(x = NMDS1, y = NMDS2), colour = "navy", fontface = "bold", label = row.names(en_coord_cont)) 
+
+
   
 ```  
 
@@ -157,13 +157,26 @@ table <- as.data.frame.table(asv)
 melted_table <- melt(table)
 
 lm_model = lm(value ~ Var1, data=melted_table); summary(lm_model)
+
 lm_results <- tidy(summary(lm_model))
+
 linear_results <-kable(lm_results)
 write.csv(lm_results,"aDNA linear results.csv",row.names = TRUE)
+
+mag29 <- asv[c(29),]
+
+
+
+
 ```
 
 #aDNA metagenomic Ordination Plots
 ```{r}
+#subset complete data
+bact_data <-subset_samples(bacteria, linear_model == "yes")
+# Create data frame for downstream analysis
+bact_data_df <- data.frame(sample_data(bact_data))
+
 # Ordinate
 bray_bact = phyloseq::distance(bacteria, method="bray")
 
@@ -178,7 +191,7 @@ pcoa<-0
 
 # Plot pcoa
 pcoa <- plot_ordination(bacteria, rt.pcoa, title =" Bacteria Bray-Curtis PCoA across date", color = "time_point")+
-geom_text(aes(label = date), size = 4, vjust =-0.3,hjust = -0.4) + geom_point(size = 4) + theme_bw() + geom_point(size = 4) +  geom_point(size=3) + theme_bw() + theme(plot.title = element_text(hjust = 0.5)) + theme(legend.text=element_text(size=12)) + theme(axis.text=element_text(size=12, face = "bold"), axis.title=element_text(size=14,face="bold") + theme(geom_text = element_text(size = 20,face = "bold")))
+geom_text(aes(label = date), size = 4, vjust =-0.3,hjust = 0.8) + geom_point(size = 4) + theme_bw() + geom_point(size = 4) +  geom_point(size=3) + theme_bw() + theme(plot.title = element_text(hjust = 0.5)) + theme(legend.text=element_text(size=12)) + theme(axis.text=element_text(size=12, face = "bold"), axis.title=element_text(size=14,face="bold") + theme(geom_text = element_text(size = 20,face = "bold")))
 
 ### PERMANOVA ANALYSIS #####
 #env material include mucus, tissue and skeleton, and outgroups without eDNA
@@ -187,7 +200,7 @@ set.seed(129)
 
 # This is what is called a for loop.        
 for (i in distance_methods){ 
-  form <- as.formula(paste(i,"time_period+time_point+date", sep="~"))
+  form <- as.formula(paste(i,"time_point+time_period+sym_shannonDiversity+bact_shannonDiversity+", sep="~"))
   print(form)
  adonis2(form, data=bact_df)-> result
  print(result)
